@@ -1,0 +1,11 @@
+flask==3.0.3
+flask-cors==4.0.1
+gunicorn==22.0.0
+pandas==2.2.2
+numpy==1.26.4
+pybaseball==2.2.7
+xgboost==2.1.1
+scikit-learn==1.5.1
+requests==2.32.3
+beautifulsoup4==4.12.3
+MLB-StatsAPI==1.7.2
