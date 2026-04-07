@@ -90,9 +90,28 @@ def fetch_statcast_data(start_date, end_date):
     print(f"Fetching Statcast data from {start_date} to {end_date}...")
     df = statcast(start_dt=start_date, end_dt=end_date)
     df = df.dropna(subset=['events'])
-    df['is_hr'] = np.where(df['events'] == 'home_run', 1, 0)
+
+    # Keep only columns we actually use — Statcast returns ~100 cols, we need ~15
+    keep_cols = ['game_pk', 'game_date', 'batter', 'pitcher', 'pitch_type',
+                 'events', 'home_team', 'launch_speed', 'launch_angle',
+                 'stand', 'p_throws', 'plate_x', 'plate_z', 'release_speed']
+    existing = [c for c in keep_cols if c in df.columns]
+    df = df[existing].copy()
+
+    df['is_hr'] = np.where(df['events'] == 'home_run', 1, 0).astype('int8')
+
     if 'game_date' in df.columns:
         df['game_date'] = pd.to_datetime(df['game_date'])
+
+    # Downcast numeric columns to float32/int32 — halves memory
+    for col in ['launch_speed', 'launch_angle', 'plate_x', 'plate_z', 'release_speed']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
+    for col in ['batter', 'pitcher', 'game_pk']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('int32')
+
+    print(f"  Loaded {len(df):,} rows, memory: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB")
     return df
 
 
@@ -702,14 +721,25 @@ def predict_game_matchups(daily_df, model, pitcher_mix, batter_strength,
 
 @app.route('/train', methods=['POST'])
 def train():
+    import gc
     try:
-        # Rolling 18-month window with recency weighting
+        # Shorter window for 512MB free-tier memory budget
         end_date = date.today().strftime('%Y-%m-%d')
-        start_date = (date.today() - timedelta(days=540)).strftime('%Y-%m-%d')
+        start_date = (date.today() - timedelta(days=90)).strftime('%Y-%m-%d')
 
         hist_data = fetch_statcast_data(start_date, end_date)
         train_data, p_mix, b_strength, r_form, p_fatigue = engineer_training_data(hist_data)
+
+        # Free the raw Statcast DataFrame — we only need engineered features now
+        del hist_data
+        gc.collect()
+
         model, features, auc, importance = train_hr_model(train_data)
+
+        train_rows = len(train_data)
+        # Free the training matrix too — model is trained, no need to keep rows around
+        del train_data
+        gc.collect()
 
         model_cache['model'] = model
         model_cache['p_mix'] = p_mix
@@ -719,7 +749,7 @@ def train():
         model_cache['features'] = features
         model_cache['auc'] = auc
         model_cache['importance'] = importance
-        model_cache['train_rows'] = len(train_data)
+        model_cache['train_rows'] = train_rows
         model_cache['train_date'] = datetime.now().isoformat()
 
         return jsonify({
@@ -727,7 +757,7 @@ def train():
             "auc": auc,
             "features": features,
             "importance": importance,
-            "train_rows": len(train_data),
+            "train_rows": train_rows,
             "date_range": f"{start_date} to {end_date}"
         })
     except Exception as e:
