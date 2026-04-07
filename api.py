@@ -6,7 +6,6 @@ from pybaseball import statcast
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
-from sklearn.calibration import CalibratedClassifierCV
 import requests
 import warnings
 import json
@@ -87,31 +86,57 @@ VENUE_COORDS = {
 # ==========================================
 
 def fetch_statcast_data(start_date, end_date):
+    """Fetch Statcast in monthly chunks to avoid loading everything at once."""
+    import gc
     print(f"Fetching Statcast data from {start_date} to {end_date}...")
-    df = statcast(start_dt=start_date, end_dt=end_date)
-    df = df.dropna(subset=['events'])
 
-    # Keep only columns we actually use — Statcast returns ~100 cols, we need ~15
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+
     keep_cols = ['game_pk', 'game_date', 'batter', 'pitcher', 'pitch_type',
                  'events', 'home_team', 'launch_speed', 'launch_angle',
                  'stand', 'p_throws', 'plate_x', 'plate_z', 'release_speed']
-    existing = [c for c in keep_cols if c in df.columns]
-    df = df[existing].copy()
 
-    df['is_hr'] = np.where(df['events'] == 'home_run', 1, 0).astype('int8')
+    chunks = []
+    cursor = start_dt
+    while cursor < end_dt:
+        chunk_end = min(cursor + timedelta(days=21), end_dt)
+        print(f"  Chunk: {cursor.date()} → {chunk_end.date()}")
+        try:
+            raw = statcast(start_dt=cursor.strftime('%Y-%m-%d'),
+                           end_dt=chunk_end.strftime('%Y-%m-%d'))
+            raw = raw.dropna(subset=['events'])
+
+            # Prune & downcast immediately, before appending
+            existing = [c for c in keep_cols if c in raw.columns]
+            raw = raw[existing].copy()
+            raw['is_hr'] = np.where(raw['events'] == 'home_run', 1, 0).astype('int8')
+
+            for col in ['launch_speed', 'launch_angle', 'plate_x', 'plate_z', 'release_speed']:
+                if col in raw.columns:
+                    raw[col] = pd.to_numeric(raw[col], errors='coerce').astype('float32')
+            for col in ['batter', 'pitcher', 'game_pk']:
+                if col in raw.columns:
+                    raw[col] = pd.to_numeric(raw[col], errors='coerce').astype('int32')
+
+            chunks.append(raw)
+            del raw
+            gc.collect()
+        except Exception as e:
+            print(f"  Chunk failed: {e}")
+        cursor = chunk_end + timedelta(days=1)
+
+    if not chunks:
+        raise RuntimeError("No Statcast data retrieved")
+
+    df = pd.concat(chunks, ignore_index=True)
+    del chunks
+    gc.collect()
 
     if 'game_date' in df.columns:
         df['game_date'] = pd.to_datetime(df['game_date'])
 
-    # Downcast numeric columns to float32/int32 — halves memory
-    for col in ['launch_speed', 'launch_angle', 'plate_x', 'plate_z', 'release_speed']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
-    for col in ['batter', 'pitcher', 'game_pk']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').astype('int32')
-
-    print(f"  Loaded {len(df):,} rows, memory: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB")
+    print(f"  Total: {len(df):,} rows, memory: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB")
     return df
 
 
@@ -321,10 +346,13 @@ def get_feature_list(df):
 
 
 def train_hr_model(features_df):
-    print("Training XGBoost Model with calibration...")
+    import gc
+    print("Training XGBoost Model (memory-lean config)...")
     features = get_feature_list(features_df)
-    X = features_df[features]
-    y = features_df['is_hr']
+
+    # Downcast feature matrix to float32 — halves training memory
+    X = features_df[features].astype('float32')
+    y = features_df['is_hr'].astype('int8')
 
     # Temporal split: use last 20% of dates as test
     if 'game_date' in features_df.columns:
@@ -338,45 +366,48 @@ def train_hr_model(features_df):
     else:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+    del X, y
+    gc.collect()
+
     # Class imbalance: scale_pos_weight
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
+    neg_count = int((y_train == 0).sum())
+    pos_count = int((y_train == 1).sum())
     scale_weight = neg_count / max(pos_count, 1)
     print(f"Class ratio: {neg_count}:{pos_count}, scale_pos_weight={scale_weight:.1f}")
 
-    base_model = xgb.XGBClassifier(
+    # Leaner tree params — smaller forest, shallower trees, histogram binning
+    model = xgb.XGBClassifier(
         objective='binary:logistic',
         eval_metric='logloss',
-        max_depth=6,
-        learning_rate=0.08,
-        n_estimators=200,
+        tree_method='hist',          # Histogram method uses ~5x less memory
+        max_bin=128,                 # Fewer bins = less memory
+        max_depth=4,                 # Shallower trees
+        learning_rate=0.1,
+        n_estimators=100,            # Half the forest size
         scale_pos_weight=scale_weight,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=5
+        subsample=0.7,
+        colsample_bytree=0.7,
+        min_child_weight=10,
+        n_jobs=1                     # Single-threaded to avoid copy overhead
     )
 
-    # Calibrated model for better probability estimates
-    calibrated_model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
-    calibrated_model.fit(X_train, y_train)
+    model.fit(X_train, y_train)
 
-    predictions = calibrated_model.predict_proba(X_test)[:, 1]
+    # Free training data before scoring
+    del X_train, y_train
+    gc.collect()
+
+    predictions = model.predict_proba(X_test)[:, 1]
     auc = roc_auc_score(y_test, predictions)
-    print(f"Calibrated Model AUC Score: {auc:.4f}")
+    print(f"Model AUC Score: {auc:.4f}")
 
-    # Feature importance from base estimators
-    importance = {}
-    try:
-        for est in calibrated_model.calibrated_classifiers_:
-            base = est.estimator
-            for fname, imp in zip(features, base.feature_importances_):
-                importance[fname] = importance.get(fname, 0) + imp
-        for k in importance:
-            importance[k] = float(importance[k] / len(calibrated_model.calibrated_classifiers_))
-    except:
-        importance = {f: 0.0 for f in features}
+    del X_test, y_test, predictions
+    gc.collect()
 
-    return calibrated_model, features, float(auc), importance
+    # Feature importance (plain XGBoost, no calibration wrapper)
+    importance = {f: float(imp) for f, imp in zip(features, model.feature_importances_)}
+
+    return model, features, float(auc), importance
 
 
 # ==========================================
@@ -723,9 +754,9 @@ def predict_game_matchups(daily_df, model, pitcher_mix, batter_strength,
 def train():
     import gc
     try:
-        # Shorter window for 512MB free-tier memory budget
+        # Short window for 512MB free-tier memory budget
         end_date = date.today().strftime('%Y-%m-%d')
-        start_date = (date.today() - timedelta(days=90)).strftime('%Y-%m-%d')
+        start_date = (date.today() - timedelta(days=60)).strftime('%Y-%m-%d')
 
         hist_data = fetch_statcast_data(start_date, end_date)
         train_data, p_mix, b_strength, r_form, p_fatigue = engineer_training_data(hist_data)
