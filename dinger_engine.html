@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dinger Engine — HR Prediction Dashboard</title>
+<meta name="theme-color" content="#0a0e17" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Dinger" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230a0e17'/%3E%3Ctext x='90' y='125' font-size='100' text-anchor='middle'%3E⚾%3C/text%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0e17; --surface: #111827; --card: #1a2234; --card-hover: #1e2a40;
+    --border: #2a3650; --border-light: #3b4d6e;
+    --text: #e2e8f0; --text-muted: #8899b4; --text-dim: #5a6a84;
+    --accent: #22d3ee; --accent-dim: #0e7490;
+    --green: #34d399; --green-bg: rgba(52,211,153,0.1); --green-border: rgba(52,211,153,0.3);
+    --red: #f87171; --red-bg: rgba(248,113,113,0.08);
+    --yellow: #fbbf24; --orange: #fb923c; --purple: #a78bfa;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', system-ui, sans-serif; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(180deg, #0f1520 0%, #0a0e17 100%);
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo {
+    width: 42px; height: 42px; border-radius: 11px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+  }
+  .header h1 {
+    font-size: 22px; font-weight: 800; font-family: 'Outfit', sans-serif;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--text), var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header .subtitle {
+    font-size: 11px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase;
+  }
+
+  .stats-bar {
+    display: flex; align-items: center; gap: 16px; padding: 8px 16px;
+    background: var(--card); border-radius: 8px; border: 1px solid var(--border);
+  }
+  .stat-chip { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .stat-chip .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-chip .value { font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .stat-divider { width: 1px; height: 24px; background: var(--border); }
+
+  .main { max-width: 1440px; margin: 0 auto; padding: 24px 32px; }
+
+  .action-bar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    padding: 10px 22px; border-radius: 8px; font-size: 13px; font-weight: 700;
+    font-family: 'DM Sans', sans-serif; cursor: pointer; transition: all 0.2s;
+    letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-accent { border: 1px solid rgba(34,211,238,0.27); background: rgba(34,211,238,0.09); color: var(--accent); }
+  .btn-accent:hover { background: rgba(34,211,238,0.18); }
+  .btn-green { border: 1px solid rgba(52,211,153,0.27); background: rgba(52,211,153,0.09); color: var(--green); }
+  .btn-green:hover { background: rgba(52,211,153,0.18); }
+  .btn:disabled { opacity: 0.5; cursor: wait; }
+  .btn .spinner { animation: spin 1s linear infinite; }
+
+  .search-input {
+    padding: 10px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); font-size: 13px; font-family: inherit;
+    outline: none; width: 220px; transition: border-color 0.2s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-dim); }
+
+  .checkbox-label {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--text-muted); cursor: pointer; user-select: none;
+  }
+  .checkbox-label input { accent-color: var(--green); }
+
+  .error-box {
+    padding: 12px 16px; background: var(--red-bg); border: 1px solid rgba(248,113,113,0.3);
+    border-radius: 8px; color: var(--red); font-size: 13px; margin-bottom: 16px;
+  }
+
+  .empty-state {
+    text-align: center; padding: 80px 20px; color: var(--text-dim);
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-state h2 { font-family: 'Outfit'; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; max-width: 440px; margin: 0 auto; line-height: 1.6; }
+
+  /* Tabs */
+  .tab-bar {
+    display: flex; gap: 2px; margin-bottom: 24px; background: var(--surface);
+    border-radius: 10px; padding: 3px; width: fit-content;
+  }
+  .tab-btn {
+    padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.2s;
+    background: transparent; color: var(--text-dim);
+  }
+  .tab-btn.active { background: var(--card); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+  .tab-count {
+    margin-left: 6px; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 700;
+  }
+  .tab-btn.active .tab-count { background: rgba(34,211,238,0.13); color: var(--accent); }
+  .tab-btn:not(.active) .tab-count { background: var(--border); color: var(--text-dim); }
+
+  /* Weather Strip */
+  .weather-strip { display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 4px; }
+  .weather-chip {
+    padding: 8px 14px; background: var(--card); border-radius: 8px;
+    border: 1px solid var(--border); font-size: 11px; white-space: nowrap;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  /* Table */
+  .picks-table {
+    background: var(--card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden;
+  }
+  .table-header {
+    display: flex; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: rgba(34,211,238,0.03);
+  }
+  .table-header .col {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-dim); user-select: none;
+  }
+  .table-header .col.sortable { cursor: pointer; }
+  .table-header .col.active { color: var(--accent); }
+  .table-row {
+    display: flex; align-items: center; padding: 10px 16px; transition: background 0.15s;
+    animation: fadeIn 0.3s ease both;
+  }
+  .table-row:hover { background: var(--card-hover); }
+  .table-row.even { background: rgba(255,255,255,0.01); }
+  .table-row.even:hover { background: var(--card-hover); }
+
+  .prob-bar-outer {
+    width: 100px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden;
+  }
+  .prob-bar-inner {
+    height: 100%; border-radius: 3px; transition: width 0.6s ease;
+  }
+
+  .ev-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+  }
+  .ev-badge.positive { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .ev-badge.negative { background: var(--red-bg); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Game Cards */
+  .game-card {
+    background: var(--card); border-radius: 12px; border: 1px solid var(--border);
+    overflow: hidden; margin-bottom: 16px; animation: fadeIn 0.3s ease both;
+  }
+  .game-card-header {
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(34,211,238,0.03);
+  }
+  .game-card-header h3 { font-size: 15px; font-weight: 700; font-family: 'Outfit'; }
+  .game-card-body { padding: 8px 12px; }
+  .game-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 6px;
+  }
+  .game-row.even { background: rgba(255,255,255,0.015); }
+
+  /* Model Info */
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .info-card {
+    background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 24px;
+  }
+  .info-card h3 { margin-bottom: 16px; font-size: 15px; font-weight: 700; font-family: 'Outfit'; color: var(--accent); }
+  .importance-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .importance-label { width: 150px; font-size: 11px; font-family: 'JetBrains Mono'; color: var(--text-muted); }
+  .importance-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+  .importance-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+  .importance-val { width: 50px; font-size: 11px; font-family: 'JetBrains Mono'; color: var(--text-dim); text-align: right; }
+
+  .config-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .config-row .k { color: var(--text-dim); }
+  .config-row .v { font-family: 'JetBrains Mono'; font-weight: 600; }
+
+  .feature-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .feature-tag {
+    padding: 4px 10px; border-radius: 6px; background: var(--surface);
+    border: 1px solid var(--border); font-size: 11px; color: var(--text-muted);
+  }
+
+  .footer-bar {
+    margin-top: 24px; padding: 12px 20px; background: var(--surface);
+    border-radius: 8px; border: 1px solid var(--border);
+    display: flex; gap: 24px; font-size: 11px; color: var(--text-dim);
+  }
+
+  @media (max-width: 900px) {
+    .header { flex-direction: column; gap: 12px; padding: 16px; }
+    .main { padding: 16px; }
+    .info-grid { grid-template-columns: 1fr; }
+    .action-bar { flex-direction: column; }
+    .search-input { width: 100%; }
+    .stats-bar { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ── Config ──
+// Change this default to your Render URL after deploying, e.g.:
+// const DEFAULT_API_BASE = "https://dinger-engine.onrender.com";
+const DEFAULT_API_BASE = "http://localhost:5000";
+let API_BASE = localStorage.getItem("dinger_api_base") || DEFAULT_API_BASE;
+
+function setApiBase(url) {
+  API_BASE = url.replace(/\/$/, "");
+  localStorage.setItem("dinger_api_base", API_BASE);
+  render();
+}
+
+function promptApiBase() {
+  const url = prompt("API Base URL:\n(e.g. https://dinger-engine.onrender.com or http://localhost:5000)", API_BASE);
+  if (url && url.trim()) {
+    setApiBase(url.trim());
+    setState({ status: null, predictions: null, error: "" });
+    fetchStatus();
+  }
+}
+
+const pct = v => (v * 100).toFixed(2) + "%";
+const pctShort = v => (v * 100).toFixed(1) + "%";
+
+// ── State ──
+let state = {
+  status: null,
+  predictions: null,
+  loading: "",
+  error: "",
+  tab: "top",
+  search: "",
+  sortBy: "adj_hr_prob",
+  showEVOnly: false,
+};
+
+function setState(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+// ── API Calls ──
+async function fetchStatus() {
+  try {
+    const r = await fetch(`${API_BASE}/status`);
+    const d = await r.json();
+    setState({ status: d });
+  } catch {}
+}
+
+async function handleTrain() {
+  setState({ loading: "training", error: "" });
+  try {
+    const r = await fetch(`${API_BASE}/train`, { method: "POST" });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    setState({
+      status: { model_trained: true, auc: d.auc, features: d.features, importance: d.importance, train_rows: d.train_rows },
+      loading: "",
+    });
+  } catch (e) {
+    setState({ error: e.message, loading: "" });
+  }
+}
+
+async function handlePredict() {
+  setState({ loading: "predicting", error: "" });
+  try {
+    const r = await fetch(`${API_BASE}/predict`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    setState({ predictions: d, loading: "" });
+  } catch (e) {
+    setState({ error: e.message, loading: "" });
+  }
+}
+
+// ── Render Helpers ──
+function spinnerSVG() {
+  return `<svg class="spinner" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/><path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+
+function evBadgeHTML(ev) {
+  if (ev === null || ev === undefined) return "";
+  const isPos = ev > 0;
+  const cls = isPos ? "positive" : "negative";
+  const arrow = isPos ? "▲" : "▼";
+  const sign = ev > 0 ? "+" : "";
+  return `<span class="ev-badge ${cls}">${arrow} ${sign}${(ev * 100).toFixed(1)}%</span>`;
+}
+
+function probBarHTML(value, max = 0.15) {
+  const w = Math.min(value / max, 1) * 100;
+  const color = value > 0.08 ? "var(--green)" : value > 0.04 ? "var(--yellow)" : "var(--text-muted)";
+  return `<div class="prob-bar-outer"><div class="prob-bar-inner" style="width:${w}%;background:${color}"></div></div>`;
+}
+
+// ── Main Render ──
+function render() {
+  const { status, predictions, loading, error, tab, search, sortBy, showEVOnly } = state;
+
+  const preds = predictions?.predictions || [];
+  const weather = predictions?.weather || {};
+
+  let filtered = [...preds];
+  if (search) {
+    const q = search.toLowerCase();
+    filtered = filtered.filter(p =>
+      (p.batter_name || "").toLowerCase().includes(q) ||
+      (p.pitcher_name || "").toLowerCase().includes(q) ||
+      (p.batting_team || "").toLowerCase().includes(q) ||
+      (p.home_team || "").toLowerCase().includes(q)
+    );
+  }
+  if (showEVOnly) filtered = filtered.filter(p => p.ev > 0);
+  filtered.sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0));
+
+  const evPlays = preds.filter(p => p.ev > 0).sort((a, b) => b.ev - a.ev);
+  const gameGroups = {};
+  preds.forEach(p => {
+    const key = `${p.away_team} @ ${p.home_team}`;
+    if (!gameGroups[key]) gameGroups[key] = [];
+    gameGroups[key].push(p);
+  });
+
+  let html = "";
+
+  // ── Header ──
+  html += `<header class="header">
+    <div class="header-left">
+      <div class="logo">⚾</div>
+      <div>
+        <h1>DINGER ENGINE</h1>
+        <p class="subtitle">XGBoost HR Prediction Model</p>
+      </div>
+    </div>`;
+
+  if (status?.model_trained) {
+    html += `<div class="stats-bar">
+      <div class="stat-chip"><span class="label">AUC</span><span class="value" style="color:var(--accent)">${status.auc?.toFixed(4) || "—"}</span></div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip"><span class="label">Features</span><span class="value" style="color:var(--purple)">${status.features?.length || 0}</span></div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip"><span class="label">Rows</span><span class="value" style="color:var(--text-muted)">${status.train_rows?.toLocaleString() || "—"}</span></div>
+    </div>`;
+  }
+  html += `<button onclick="promptApiBase()" title="API: ${API_BASE}" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 10px;border-radius:8px;cursor:pointer;font-size:14px;margin-left:8px">⚙</button>`;
+  html += `</header>`;
+
+  // ── Main ──
+  html += `<div class="main">`;
+
+  // Action Bar
+  html += `<div class="action-bar">
+    <button class="btn btn-accent" onclick="handleTrain()" ${loading ? "disabled" : ""}>
+      ${loading === "training" ? spinnerSVG() + " Training Model..." : "🧠 Train Model"}
+    </button>
+    <button class="btn btn-green" onclick="handlePredict()" ${loading || !status?.model_trained ? "disabled" : ""}>
+      ${loading === "predicting" ? spinnerSVG() + " Loading Predictions..." : "🎯 Load Predictions"}
+    </button>`;
+
+  if (predictions) {
+    html += `<div style="flex:1"></div>
+    <input class="search-input" type="text" placeholder="Search player, team..." value="${search}" oninput="setState({search:this.value})" />
+    <label class="checkbox-label"><input type="checkbox" ${showEVOnly ? "checked" : ""} onchange="setState({showEVOnly:this.checked})" /> EV+ Only</label>`;
+  }
+  html += `</div>`;
+
+  // Error
+  if (error) {
+    html += `<div class="error-box">${error}</div>`;
+  }
+
+  // Empty State
+  if (!status?.model_trained && !loading) {
+    html += `<div class="empty-state">
+      <div class="icon">🧠</div>
+      <h2>No Model Loaded</h2>
+      <p>Click <strong>Train Model</strong> to fetch Statcast data and build the XGBoost prediction engine. This pulls ~18 months of pitch-level data and trains with calibration, platoon splits, recent form, pitcher fatigue, and more.</p>
+    </div>`;
+  }
+
+  // ── Predictions UI ──
+  if (predictions) {
+    // Tabs
+    const tabs = [
+      { id: "top", label: "🏆 Top Picks", count: Math.min(filtered.length, 40) },
+      { id: "ev", label: "💰 EV+ Plays", count: evPlays.length },
+      { id: "games", label: "📋 By Game", count: Object.keys(gameGroups).length },
+      { id: "model", label: "📊 Model Info" },
+    ];
+    html += `<div class="tab-bar">`;
+    tabs.forEach(t => {
+      const active = tab === t.id ? "active" : "";
+      const countHTML = t.count !== undefined ? `<span class="tab-count">${t.count}</span>` : "";
+      html += `<button class="tab-btn ${active}" onclick="setState({tab:'${t.id}'})">${t.label}${countHTML}</button>`;
+    });
+    html += `</div>`;
+
+    // Weather Strip
+    if (Object.keys(weather).length > 0 && tab !== "model") {
+      html += `<div class="weather-strip">`;
+      Object.entries(weather).forEach(([venue, w]) => {
+        const shortVenue = venue.replace(/\b(Park|Field|Stadium)\b/g, "").trim();
+        const tempColor = w.temp_f > 80 ? "var(--orange)" : w.temp_f < 55 ? "var(--accent)" : "var(--text)";
+        html += `<div class="weather-chip">
+          <span style="color:var(--text-dim)">${shortVenue}</span>
+          <span style="color:${tempColor}">${w.temp_f}°F</span>
+          <span style="color:var(--text-dim)">💨 ${w.wind_mph} mph</span>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
+    // ── TOP PICKS / EV+ TAB ──
+    if (tab === "top" || tab === "ev") {
+      const rows = tab === "ev" ? evPlays : filtered.slice(0, 40);
+      const currentSort = tab === "ev" ? "ev" : sortBy;
+
+      if (rows.length === 0) {
+        html += `<div class="picks-table"><div style="text-align:center;padding:60px;color:var(--text-dim)">
+          <p style="font-size:16px;margin-bottom:8px">${tab === "ev" ? "No EV+ plays found" : "No matching results"}</p>
+          ${tab === "ev" ? '<p style="font-size:13px">Add your The Odds API key in api.py for live FanDuel odds.</p>' : ""}
+        </div></div>`;
+      } else {
+        html += `<div class="picks-table">`;
+        // Header
+        const cols = [
+          { key: "rank", label: "#", w: "36px" },
+          { key: "batter_name", label: "Batter", flex: "1" },
+          { key: "batting_team", label: "Team", w: "70px" },
+          { key: "pitcher_name", label: "vs Pitcher", flex: "0.8" },
+          { key: "adj_hr_prob", label: "HR Prob", w: "80px", sortable: true },
+          { key: "bar", label: "", w: "110px" },
+          { key: "base_hr_prob", label: "Base", w: "65px", sortable: true },
+          { key: "weather_temp", label: "Temp", w: "50px" },
+          { key: "american_odds", label: "Odds", w: "65px" },
+          { key: "implied_prob", label: "Implied", w: "65px" },
+          { key: "ev", label: "EV", w: "90px", sortable: true },
+        ];
+        html += `<div class="table-header">`;
+        cols.forEach(c => {
+          const style = c.w ? `width:${c.w}` : `flex:${c.flex}`;
+          const cls = `col${c.sortable ? " sortable" : ""}${currentSort === c.key ? " active" : ""}`;
+          const onclick = c.sortable ? `onclick="setState({sortBy:'${c.key}'})"` : "";
+          html += `<div class="${cls}" style="${style}" ${onclick}>${c.label}${currentSort === c.key ? " ▾" : ""}</div>`;
+        });
+        html += `</div>`;
+
+        // Rows
+        rows.forEach((p, i) => {
+          const probColor = p.adj_hr_prob > 0.06 ? "var(--green)" : p.adj_hr_prob > 0.03 ? "var(--yellow)" : "var(--text)";
+          const rankColor = i < 3 ? "var(--accent)" : "var(--text-dim)";
+          const oddsColor = p.american_odds > 0 ? "var(--green)" : "var(--text)";
+          const oddsSign = p.american_odds > 0 ? "+" : "";
+          const teamShort = (p.batting_team || "").split(" ").pop();
+          html += `<div class="table-row ${i % 2 === 0 ? "" : "even"}" style="animation-delay:${i * 20}ms">
+            <div style="width:36px;font-size:11px;color:${rankColor}" class="mono">${i + 1}</div>
+            <div style="flex:1;font-size:13px;font-weight:600">${p.batter_name}</div>
+            <div style="width:70px;font-size:11px;color:var(--text-muted)">${teamShort}</div>
+            <div style="flex:0.8;font-size:12px;color:var(--text-muted)">vs ${p.pitcher_name}</div>
+            <div style="width:80px;font-size:14px;font-weight:700;color:${probColor}" class="mono">${pct(p.adj_hr_prob)}</div>
+            <div style="width:110px">${probBarHTML(p.adj_hr_prob)}</div>
+            <div style="width:65px;font-size:11px;color:var(--text-dim)" class="mono">${pct(p.base_hr_prob)}</div>
+            <div style="width:50px;font-size:11px;color:var(--text-dim)">${p.weather_temp}°</div>
+            <div style="width:65px;font-size:12px;font-weight:600;color:${oddsColor}" class="mono">${oddsSign}${p.american_odds}</div>
+            <div style="width:65px;font-size:11px;color:var(--text-dim)" class="mono">${p.implied_prob ? pctShort(p.implied_prob) : "—"}</div>
+            <div style="width:90px">${evBadgeHTML(p.ev)}</div>
+          </div>`;
+        });
+        html += `</div>`;
+      }
+    }
+
+    // ── GAMES TAB ──
+    if (tab === "games") {
+      Object.entries(gameGroups).forEach(([matchup, players]) => {
+        const sorted = [...players].sort((a, b) => b.adj_hr_prob - a.adj_hr_prob);
+        const gw = weather[sorted[0]?.venue] || {};
+        html += `<div class="game-card">
+          <div class="game-card-header">
+            <h3>${matchup}</h3>
+            <div style="display:flex;gap:12px;font-size:11px;color:var(--text-dim)">
+              <span>${sorted[0]?.venue || ""}</span>
+              ${gw.temp_f ? `<span>${gw.temp_f}°F / ${gw.wind_mph}mph</span>` : ""}
+            </div>
+          </div>
+          <div class="game-card-body">`;
+        sorted.slice(0, 12).forEach((p, i) => {
+          const probColor = p.adj_hr_prob > 0.06 ? "var(--green)" : "var(--text)";
+          html += `<div class="game-row ${i % 2 === 0 ? "" : "even"}">
+            <span style="width:22px;font-size:11px;color:var(--text-dim);text-align:right" class="mono">${i + 1}</span>
+            <span style="flex:1;font-size:13px;font-weight:600">${p.batter_name}</span>
+            <span style="font-size:11px;color:var(--text-dim);width:120px">vs ${p.pitcher_name}</span>
+            <span style="font-size:13px;font-weight:700;color:${probColor};width:60px;text-align:right" class="mono">${pct(p.adj_hr_prob)}</span>
+            <span style="width:100px">${probBarHTML(p.adj_hr_prob)}</span>
+            <span style="width:90px">${evBadgeHTML(p.ev)}</span>
+          </div>`;
+        });
+        html += `</div></div>`;
+      });
+    }
+
+    // ── MODEL INFO TAB ──
+    if (tab === "model") {
+      html += `<div class="info-grid">`;
+
+      // Feature Importance
+      html += `<div class="info-card"><h3>Feature Importance</h3>`;
+      if (status?.importance) {
+        const entries = Object.entries(status.importance).sort(([,a],[,b]) => b - a);
+        const maxImp = Math.max(...entries.map(([,v]) => v));
+        entries.forEach(([feat, imp]) => {
+          const w = (imp / maxImp) * 100;
+          html += `<div class="importance-row">
+            <span class="importance-label">${feat}</span>
+            <div class="importance-bar"><div class="importance-fill" style="width:${w}%"></div></div>
+            <span class="importance-val">${imp.toFixed(3)}</span>
+          </div>`;
+        });
+      }
+      html += `</div>`;
+
+      // Right column
+      html += `<div style="display:flex;flex-direction:column;gap:20px">`;
+
+      // Config
+      html += `<div class="info-card"><h3>Model Config</h3>`;
+      [
+        ["Algorithm", "XGBoost + Isotonic Calibration"],
+        ["AUC", status?.auc?.toFixed(4) || "—"],
+        ["Features", status?.features?.length || 0],
+        ["Training Rows", status?.train_rows?.toLocaleString() || "—"],
+        ["Split", "Temporal (80/20)"],
+        ["Class Balance", "scale_pos_weight"],
+        ["Window", "Rolling 18 months"],
+      ].forEach(([k, v]) => {
+        html += `<div class="config-row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+      });
+      html += `</div>`;
+
+      // Feature Tags
+      html += `<div class="info-card"><h3>Enhanced Features</h3><div class="feature-tags">`;
+      ["Platoon Splits","7d Form","14d Form","30d Form","Pitcher Fatigue","Days Rest",
+       "Park Factor","EV × Park","Weather Adj","Calibrated Probs","Class Balanced","Temporal Split"
+      ].forEach(f => { html += `<span class="feature-tag">${f}</span>`; });
+      html += `</div></div>`;
+
+      html += `</div></div>`; // end right col, end grid
+    }
+
+    // Footer
+    html += `<div class="footer-bar">
+      <span>📊 ${preds.length} matchups across ${Object.keys(gameGroups).length} games</span>
+      <span>🎯 Odds: ${predictions?.odds_source || "synthetic"}</span>
+      <span>🧠 AUC: ${predictions?.model_auc?.toFixed(4) || "—"}</span>
+      <span>💰 ${evPlays.length} EV+ plays</span>
+    </div>`;
+  }
+
+  html += `</div>`; // end main
+  document.getElementById("root").innerHTML = html;
+}
+
+// ── Init ──
+fetchStatus();
+render();
+</script>
+</body>
+</html>
